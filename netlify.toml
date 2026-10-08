@@ -1,0 +1,6 @@
+[build]
+  publish = "public"
+  command = "# no build step"
+
+[functions]
+  node_bundler = "esbuild"
