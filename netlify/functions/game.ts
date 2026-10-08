@@ -5,12 +5,18 @@ import { SCENARIOS, type Scenario } from "../../lib/scenarios";
 
 const key = (code: string) => `room:${code}`;
 const id = () => Math.random().toString(36).slice(2, 10);
-const roomCode = () => Math.random().toString(36).slice(2, 6).toUpperCase();
+const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I to avoid misreads
+const roomCode = () => Array.from({ length: 6 }, () => ROOM_ALPHABET[Math.floor(Math.random() * ROOM_ALPHABET.length)]).join("");
 const norm = (x: unknown) => String(x || "").trim().toLowerCase();
 const now = () => Date.now();
 const json = (body: any, status = 200) => ({ statusCode: status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" }, body: JSON.stringify(body) });
 
-type Player = { id: string; name: string; score: number; connected: boolean; last: number };
+type Stats = { slips: number; teacher: number; caught: number };
+type Player = { id: string; name: string; score: number; connected: boolean; last: number; stats?: Stats };
+const newStats = (): Stats => ({ slips: 0, teacher: 0, caught: 0 });
+const st = (p: Player): Stats => p.stats || (p.stats = newStats());
+// Final ranking: score, then more successful slips, then more points earned as teacher, then fewest times caught.
+export const rankPlayers = (ps: Player[]) => ps.sort((a, b) => (b.score - a.score) || (st(b).slips - st(a).slips) || (st(b).teacher - st(a).teacher) || (st(a).caught - st(b).caught));
 type Room = {
   code: string; players: Record<string, Player>; settings: { rounds: number }; phase: string;
   teacherIndex: number; roundNumber: number; messages: { id: string; playerId: string; name: string; text: string }[];
@@ -47,6 +53,9 @@ function resolve(r: Room) {
   else if (a) plus(a.studentId, q.scenario.wrong);
   for (const x in q.chits) if (q.slipped[x] && !(a && a.studentId === x && q.chits[x] === a.word)) plus(x, q.scenario.slip);
   for (const x in d) r.players[x].score += d[x];
+  for (const x in q.chits) if (q.slipped[x]) st(r.players[x]).slips++;
+  st(r.players[q.teacherId]).teacher += d[q.teacherId] || 0;
+  if (a && q.chits[a.studentId] === a.word) st(r.players[a.studentId]).caught++;
   q.results = { deltas: d, words: q.chits, correct: !!(a && q.chits[a.studentId] === a.word) };
   r.phase = "results"; q.resultsEndsAt = now() + 10000;
 }
@@ -62,6 +71,8 @@ function view(r: Room, pid: string) {
   const q = r.round;
   return {
     code: r.code, phase: r.phase, hostless: r.hostless, settings: r.settings, roundNumber: r.roundNumber,
+    standings: rankPlayers(Object.values(r.players)).map(p => p.id),
+    tied: (() => { const o = rankPlayers(Object.values(r.players)); if (o.length < 2) return false; const [a, b] = o; return a.score === b.score && st(a).slips === st(b).slips && st(a).teacher === st(b).teacher && st(a).caught === st(b).caught; })(),
     players: Object.values(r.players).map(p => ({ id: p.id, name: p.name, score: p.score, connected: p.connected })),
     messages: r.messages, taunts: r.taunts,
     round: q ? {
@@ -76,18 +87,21 @@ function view(r: Room, pid: string) {
 
 async function withRoom(store: BlobStore, code: string, fn: (r: Room | null) => { ret: any }) {
   for (let i = 0; i < 6; i++) {
+    // getWithMetadata returns null (not an object) when the room does not exist.
     const got = await store.getWithMetadata(key(code), { consistency: "strong" });
-    const room: Room | null = got.data ? JSON.parse(got.data) : null;
-    const before = got.data || "";
+    const room: Room | null = got?.data ? JSON.parse(got.data) : null;
+    const before = got?.data || "";
+    if (room) tick(room); // advance timers on every request, not only on GET polls
     const { ret } = fn(room);
     if (!room) return json(ret);
     const after = JSON.stringify(room);
     if (after === before) return json(ret);
-    try {
-      if (got.etag) await store.set(key(code), after, { etag: got.etag });
-      else await store.set(key(code), after, { onlyIfNew: true });
-      return json(ret);
-    } catch { /* conditional write lost — retry */ }
+    // SDK v11 option is onlyIfMatch (not etag). A failed condition returns {modified:false} instead of throwing.
+    const w = got?.etag
+      ? await store.set(key(code), after, { onlyIfMatch: got.etag })
+      : await store.set(key(code), after, { onlyIfNew: true });
+    if (w.modified) return json(ret);
+    /* another request wrote first — reload and retry */
   }
   return json({ ok: false, error: "Classroom is busy — try again." });
 }
@@ -111,9 +125,10 @@ export const handler: Handler = async (event) => {
   switch (body.action) {
     case "create": {
       const c = roomCode();
-      const p: Player = { id: id(), name: String(body.name || "Student").slice(0, 18), score: 0, connected: true, last: 0 };
+      const p: Player = { id: id(), name: String(body.name || "Student").slice(0, 18), score: 0, connected: true, last: 0, stats: newStats() };
       const room: Room = { code: c, players: { [p.id]: p }, settings: { rounds: [3, 5, 7].includes(+body.rounds) ? +body.rounds : 5 }, phase: "lobby", teacherIndex: 0, roundNumber: 0, messages: [], used: [], hostId: p.id, hostless: false, taunts: [], round: null };
-      try { await store.set(key(c), JSON.stringify(room), { onlyIfNew: true }); } catch { return json({ ok: false, error: "Try again." }); }
+      const w = await store.set(key(c), JSON.stringify(room), { onlyIfNew: true });
+      if (!w.modified) return json({ ok: false, error: "Try again." });
       return json({ ok: true, code: c, id: p.id, view: view(room, p.id) });
     }
     case "join":
@@ -121,7 +136,7 @@ export const handler: Handler = async (event) => {
         if (!r) return { ret: { ok: false, error: "That classroom doesn’t exist." } };
         if (r.phase !== "lobby") return { ret: { ok: false, error: "This game has already started. Refresh to reclaim your seat." } };
         if (Object.keys(r.players).length >= 8) return { ret: { ok: false, error: "This classroom is full." } };
-        const p: Player = { id: id(), name: String(body.name || "Student").slice(0, 18), score: 0, connected: true, last: 0 };
+        const p: Player = { id: id(), name: String(body.name || "Student").slice(0, 18), score: 0, connected: true, last: 0, stats: newStats() };
         r.players[p.id] = p;
         return { ret: { ok: true, code: r.code, id: p.id, view: view(r, p.id) }, };
       });
@@ -140,7 +155,7 @@ export const handler: Handler = async (event) => {
     case "again":
       return withRoom(store, code, (r) => {
         if (!r || r.phase !== "gameover") return { ret: { ok: false } };
-        for (const p of Object.values(r.players)) p.score = 0;
+        for (const p of Object.values(r.players)) { p.score = 0; p.stats = newStats(); }
         r.roundNumber = 0; r.teacherIndex = 0; r.used = []; r.taunts = []; r.messages = []; r.round = null; r.phase = "lobby";
         return { ret: { ok: true, view: view(r, pid) } };
       });
