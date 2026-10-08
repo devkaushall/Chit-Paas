@@ -144,23 +144,41 @@ input,select{font:inherit;color:var(--ink)}
 .over-card{max-width:560px;margin:6vh auto}
 .over-card h1{margin:6px 0 14px;letter-spacing:-.03em}
 
-/* ---------- responsive ---------- */
-@media(max-width:1023px){
-  .game{grid-template-columns:1fr}
-  .rail{flex-direction:row;overflow-x:auto;padding-bottom:4px}
-  .rail h3{display:none}
-  .p-card{flex:none;width:auto}
-  .p-card b{display:none}
-  .side{display:grid;grid-template-columns:1fr 1fr;align-items:start}
-  .role-card{grid-column:1/-1}
-  .chat-card{max-height:none;min-height:380px}
+/* ---------- overlays & states ---------- */
+.overlay{position:fixed;inset:0;background:rgba(41,37,36,.5);display:grid;place-items:center;z-index:60;padding:20px}
+.overlay .card{max-width:540px;width:100%}
+.empty{color:var(--muted);text-align:center;padding:28px 10px;font-size:.95rem}
+.res-row.head{font-weight:800;border-bottom:1.5px solid var(--line)}
+
+/* ---------- responsive: tablet = desktop adapted ---------- */
+@media(min-width:900px) and (max-width:1179px){
+  .game{grid-template-columns:176px 1fr 240px}
+  .p-card{padding:8px}
+  .ava{width:32px;height:32px}
+  .side{gap:10px}
 }
-@media(max-width:700px){
-  #app{padding:14px 14px 30px}
+/* ---------- responsive: mobile = chat-first, reference pattern ---------- */
+@media(max-width:899px){
+  #app{padding:12px 12px 24px}
+  .game{display:flex;flex-direction:column;gap:12px}
+  .rail{flex-direction:row;overflow-x:auto;gap:8px;padding-bottom:2px}
+  .rail h3{display:none}
+  .p-card{flex:none}
+  .p-card b{display:none}
+  .chat-card{min-height:0;height:calc(100dvh - 300px);max-height:560px}
+  .messages{min-height:120px}
+  .send{position:sticky;bottom:0;background:var(--paper);padding-bottom:4px}
+  .side{display:flex;flex-direction:column;gap:12px}
+  .topbar{gap:8px}
+  .topbar .pill.round:last-of-type{display:none}
   .landing{grid-template-columns:1fr}
-  .board{min-height:240px;order:-1}
+  .board{min-height:220px;order:-1}
   .forms{grid-template-columns:1fr}
   .feat-row{grid-template-columns:1fr 1fr}
-  .side{grid-template-columns:1fr}
-  .topbar .pill.round .sc{display:none}
+  .hero{font-size:2.1rem}
+}
+@media(max-width:480px){
+  .feat-row{grid-template-columns:1fr 1fr;gap:10px}
+  .btn{padding:11px 18px}
+  .chat-card{height:calc(100dvh - 320px)}
 }

@@ -2,6 +2,7 @@ const guide=`<div class="masala-guide" style="margin-top:10px"><b>Possible perio
 let lastTarget="";
 function masala(){const s=window.chitState,m=window.chitMe;
 const hb=document.querySelector("#howto-body");if(hb&&!hb.querySelector(".masala-guide"))hb.insertAdjacentHTML("beforeend",guide);
+const og=document.querySelector("#ov-guide");if(og&&!og.querySelector(".masala-guide"))og.insertAdjacentHTML("beforeend",guide);
 if(!s)return;
 const r=s.round;if(!r||!r.scenario)return;
 const input=document.querySelector("#chattext");
